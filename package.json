@@ -1,0 +1,50 @@
+{
+  "name": "@vicstack/cache",
+  "version": "0.1.0",
+  "description": "Hono rate-limit middleware backed by @vicstack/redis.",
+  "license": "MIT",
+  "author": "Victoriano <fvictoriano.dev@gmail.com>",
+  "keywords": ["redis", "hono", "rate-limit", "cache"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FranciscoAVD/cache.git"
+  },
+  "bugs": {
+    "url": "https://github.com/FranciscoAVD/cache/issues"
+  },
+  "homepage": "https://github.com/FranciscoAVD/cache#readme",
+  "type": "module",
+  "module": "./dist/index.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && bun build ./src/index.ts --outdir ./dist --target node --format esm",
+    "test": "bun test",
+    "prepublishOnly": "bun run test && bun run build"
+  },
+  "dependencies": {
+    "@vicstack/http": "^0.1.0",
+    "@vicstack/try-catch": "^0.1.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@vicstack/redis": "^0.1.0",
+    "hono": "^4.13.13",
+    "typescript": "^5"
+  },
+  "peerDependencies": {
+    "@vicstack/redis": "^0.1.0",
+    "hono": "^4.13.13",
+    "typescript": "^5"
+  }
+}
