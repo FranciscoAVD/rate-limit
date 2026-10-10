@@ -1,18 +1,18 @@
 {
-  "name": "@vicstack/cache",
+  "name": "@vicstack/rate-limit",
   "version": "0.1.0",
   "description": "Hono rate-limit middleware backed by @vicstack/redis.",
   "license": "MIT",
   "author": "Victoriano <fvictoriano.dev@gmail.com>",
-  "keywords": ["redis", "hono", "rate-limit", "cache"],
+  "keywords": ["redis", "hono", "rate-limit"],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/FranciscoAVD/cache.git"
+    "url": "git+https://github.com/FranciscoAVD/rate-limit.git"
   },
   "bugs": {
-    "url": "https://github.com/FranciscoAVD/cache/issues"
+    "url": "https://github.com/FranciscoAVD/rate-limit/issues"
   },
-  "homepage": "https://github.com/FranciscoAVD/cache#readme",
+  "homepage": "https://github.com/FranciscoAVD/rate-limit#readme",
   "type": "module",
   "module": "./dist/index.js",
   "main": "./dist/index.js",

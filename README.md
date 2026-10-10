@@ -1,11 +1,11 @@
-# @vicstack/cache
+# @vicstack/rate-limit
 
 Hono rate-limit middleware, backed by
 [`@vicstack/redis`](https://github.com/FranciscoAVD/redis).
 
 ```ts
 import { createRedis } from "@vicstack/redis";
-import { createRateLimit } from "@vicstack/cache";
+import { createRateLimit } from "@vicstack/rate-limit";
 
 const redis = createRedis({ url: env.REDIS_URL });
 const rateLimit = createRateLimit({ redis, onError? });
@@ -29,7 +29,7 @@ rateLimit({ keyPrefix, windowSec, max, by? })   // Hono middleware
 ```ts
 // routes.ts
 import { createRedis } from "@vicstack/redis";
-import { createRateLimit } from "@vicstack/cache";
+import { createRateLimit } from "@vicstack/rate-limit";
 
 const redis = createRedis({ url: env.REDIS_URL });
 const rateLimit = createRateLimit({ redis });
