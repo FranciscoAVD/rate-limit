@@ -10,12 +10,12 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "@vicstack/redis": "^0.1.0",
+        "@vicstack/redis": "^0.1.1",
         "hono": "^4.13.13",
         "typescript": "^5",
       },
       "peerDependencies": {
-        "@vicstack/redis": "^0.1.0",
+        "@vicstack/redis": "^0.1.1",
         "hono": "^4.13.13",
         "typescript": "^5",
       },
@@ -28,7 +28,7 @@
 
     "@vicstack/http": ["@vicstack/http@0.2.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-IrLwnHpKf84FxEZ0V98s8LHoYsJ8b/sQTp3j/ITzrC8nvg1em3LoyWZw0y0D09adgEOWya5T98dGDh1L73+4PQ=="],
 
-    "@vicstack/redis": ["@vicstack/redis@0.1.0", "", { "dependencies": { "@vicstack/try-catch": "^0.1.1" }, "peerDependencies": { "typescript": "^5" } }, "sha512-fdUDrHUaFEqZd8eyj7HCpYwzFPyzjrsmIjhlOjHRkFCE0GJSz2RE/jsgJVj1Cf2MbSR+FqyFByjJXaRx6WhRPA=="],
+    "@vicstack/redis": ["@vicstack/redis@0.1.1", "", { "dependencies": { "@vicstack/try-catch": "^0.1.1" }, "peerDependencies": { "typescript": "^5" } }, "sha512-+hBfapZY1EsiO7NZ6BnIXEp/5VHe3f/Akk8BuDdDRDXS0tYCZG5xWSRY4CLwmOEL9sHfutIhvwJ2V/qpzf2lQA=="],
 
     "@vicstack/try-catch": ["@vicstack/try-catch@0.1.1", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-SaTYhiVYzGuqLwL8nd3zN3fIsjeNVBUwePBLA0Zit/htviclUIw0BozPKqHnHSRKLEhAq30Zq9bAHnJ0/MJQ3Q=="],
 
