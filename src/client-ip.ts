@@ -60,6 +60,10 @@ function socketAddress(c: Context): string | undefined {
  * Resolves the client address for `c`, or `undefined` when it cannot be
  * determined with the configured trust. Never falls back to a header the
  * configuration does not trust.
+ *
+ * TODO: an IPv6 client can rotate through its /64 to get a fresh identity
+ * (and bucket) on every request. Consider truncating to the /64 prefix
+ * before using the result as a rate-limit key.
  */
 export function getClientIp(
   c: Context,

@@ -2,8 +2,10 @@ import { createMiddleware } from "hono/factory";
 import type { Context, Env } from "hono";
 import HTTP from "@vicstack/http";
 import tryCatch from "@vicstack/try-catch";
-import type { Increment, OnError } from "@vicstack/redis";
 import { assertClientIpOptions, getClientIp, type ClientIpOptions } from "./client-ip";
+
+type Increment = (key: string, ttlSec: number) => Promise<number>;
+type OnError = (error: Error, context: string) => void;
 
 export type RateLimitOptions<E extends Env = Env> = {
   /** Namespaces the counter so different routes don't share a budget. */
@@ -31,14 +33,28 @@ export type RateLimitOptions<E extends Env = Env> = {
 };
 
 const defaultOnError: OnError = (error, context) => {
-  console.error(`[cache] ${context}`, error);
+  console.error(`[ratelimit] ${context}`, error);
 };
 
+const defaultOnLimit = (c: Context, retryAfter: number) =>
+  c.json(
+    { message: "Too many requests. Please try again later." },
+    HTTP.TooManyRequests,
+    { "Retry-After": String(retryAfter) },
+  );
+
 export type CreateRateLimitOptions = ClientIpOptions & {
-  /** A `@vicstack/redis` instance, e.g. `createRedis({ url: env.REDIS_URL })`. */
+  /** Anything shaped like a `@vicstack/redis` instance, e.g. `createRedis({ url: env.REDIS_URL })`. */
   redis: { client: { ttl(key: string): Promise<number> }; increment: Increment };
   /** Called whenever a Redis operation fails. Defaults to `console.error`. */
   onError?: OnError;
+  /**
+   * Builds the response for a request over its limit. `retryAfter` is the
+   * number of seconds until the window resets, already clamped to at least
+   * 1. Defaults to a `429` with `{ message }` and a `Retry-After` header;
+   * override to match your app's error envelope.
+   */
+  onLimit?: (c: Context, retryAfter: number) => Response | Promise<Response>;
 };
 
 /**
@@ -58,6 +74,7 @@ export type CreateRateLimitOptions = ClientIpOptions & {
 export function createRateLimit({
   redis,
   onError = defaultOnError,
+  onLimit = defaultOnLimit,
   trustedProxies,
   ipHeader,
 }: CreateRateLimitOptions) {
@@ -110,11 +127,7 @@ export function createRateLimit({
 
       if (count > max) {
         const [retryAfter] = await tryCatch(redis.client.ttl(key));
-        return c.json(
-          { message: "Too many requests. Please try again later." },
-          HTTP.TooManyRequests,
-          { "Retry-After": String(Math.max(retryAfter ?? windowSec, 1)) },
-        );
+        return onLimit(c, Math.max(retryAfter ?? windowSec, 1));
       }
 
       await next();

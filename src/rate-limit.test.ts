@@ -43,6 +43,17 @@ describe("createRateLimit", () => {
     expect(res.headers.get("Retry-After")).toBe("42");
   });
 
+  test("onLimit overrides the 429 response", async () => {
+    const { rateLimit } = setup({
+      increment: async () => 6,
+      ttl: async () => 42,
+      onLimit: (c, retryAfter) => c.json({ error: "slow down", retryAfter }, 429),
+    });
+    const res = await appWith(rateLimit).request("/", {}, bunSocket("10.0.0.1"));
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "slow down", retryAfter: 42 });
+  });
+
   test("fails open when Redis errors", async () => {
     const { rateLimit, errors } = setup({
       increment: async () => {

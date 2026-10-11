@@ -1,14 +1,15 @@
 # @vicstack/rate-limit
 
-Hono rate-limit middleware, backed by
-[`@vicstack/redis`](https://github.com/FranciscoAVD/redis).
+Hono rate-limit middleware on top of an atomic increment-with-TTL primitive.
+Works with [`@vicstack/redis`](https://github.com/FranciscoAVD/redis) or any
+object shaped the same way — see `redis` below.
 
 ```ts
 import { createRedis } from "@vicstack/redis";
 import { createRateLimit } from "@vicstack/rate-limit";
 
 const redis = createRedis({ url: env.REDIS_URL });
-const rateLimit = createRateLimit({ redis, trustedProxies: 1, onError? });
+const rateLimit = createRateLimit({ redis, trustedProxies: 1, onError?, onLimit? });
 
 rateLimit({ keyPrefix, windowSec, max, by? })   // Hono middleware
 ```
@@ -17,6 +18,12 @@ rateLimit({ keyPrefix, windowSec, max, by? })   // Hono middleware
 - `onError?: (error, context) => void` defaults to `console.error` and is
   called instead of throwing whenever a Redis op fails — `rateLimit` fails
   soft (lets the request through rather than taking the route down).
+- `onLimit?: (c, retryAfter) => Response` builds the response for a request
+  over its limit. `retryAfter` is the seconds until the window resets
+  (already clamped to at least 1). Defaults to a `429` with
+  `{ message: "Too many requests. Please try again later." }` and a
+  `Retry-After` header; override it to match your app's error envelope:
+  `onLimit: (c, retryAfter) => c.json({ error: { code: "rate_limited", retryAfter } }, 429)`.
 - `trustedProxies` / `ipHeader` say how to find the client address behind a
   reverse proxy. See [Behind a reverse proxy](#behind-a-reverse-proxy).
 - `by` derives the identity the limit is scoped to; it defaults to the client
