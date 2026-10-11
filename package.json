@@ -1,6 +1,6 @@
 {
   "name": "@vicstack/rate-limit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Hono rate-limit middleware backed by @vicstack/redis.",
   "license": "MIT",
   "author": "Victoriano <fvictoriano.dev@gmail.com>",
@@ -28,7 +28,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && bun build ./src/index.ts --outdir ./dist --target node --format esm",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && bun build ./src/index.ts --outdir ./dist --target node --format esm --external hono --external '@vicstack/*'",
     "test": "bun test",
     "prepublishOnly": "bun run test && bun run build"
   },
