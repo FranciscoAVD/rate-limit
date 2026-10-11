@@ -1,6 +1,6 @@
 {
   "name": "@vicstack/rate-limit",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Hono rate-limit middleware backed by @vicstack/redis.",
   "license": "MIT",
   "author": "Victoriano <fvictoriano.dev@gmail.com>",
@@ -33,7 +33,7 @@
     "prepublishOnly": "bun run test && bun run build"
   },
   "dependencies": {
-    "@vicstack/http": "^0.1.0",
+    "@vicstack/http": "^0.2.0",
     "@vicstack/try-catch": "^0.1.1"
   },
   "devDependencies": {
