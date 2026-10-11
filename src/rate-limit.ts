@@ -3,6 +3,7 @@ import type { Context, Env } from "hono";
 import HTTP from "@vicstack/http";
 import tryCatch from "@vicstack/try-catch";
 import type { Increment, OnError } from "@vicstack/redis";
+import { assertClientIpOptions, getClientIp, type ClientIpOptions } from "./client-ip";
 
 export type RateLimitOptions<E extends Env = Env> = {
   /** Namespaces the counter so different routes don't share a budget. */
@@ -12,9 +13,13 @@ export type RateLimitOptions<E extends Env = Env> = {
   /** Max requests allowed per window. */
   max: number;
   /**
-   * Derives the identity the limit is scoped to. Defaults to the caller's
-   * IP (`x-forwarded-for` / `cf-connecting-ip`), falling back to a single
-   * shared bucket if neither header is present.
+   * Derives the identity the limit is scoped to. Defaults to the client
+   * address resolved with the `trustedProxies` / `ipHeader` given to
+   * `createRateLimit` (the socket address if neither is set).
+   *
+   * Returning `undefined` means "no identity": the request is let through
+   * and the problem is reported through `onError`, rather than being pooled
+   * into one bucket shared by everyone.
    *
    * Reading anything beyond the default requires an explicit type argument
    * to type-check, e.g. `rateLimit<RequireSessionEnv>({ by: (c) =>
@@ -22,19 +27,14 @@ export type RateLimitOptions<E extends Env = Env> = {
    * This only catches a wrong/misspelled key; it can't catch using a
    * variable before the middleware that actually sets it has run.
    */
-  by?: (c: Context<E>) => string | Promise<string>;
+  by?: (c: Context<E>) => string | undefined | Promise<string | undefined>;
 };
-
-const defaultBy = (c: Context) =>
-  c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
-  c.req.header("cf-connecting-ip") ??
-  "anonymous";
 
 const defaultOnError: OnError = (error, context) => {
   console.error(`[cache] ${context}`, error);
 };
 
-export type CreateRateLimitOptions = {
+export type CreateRateLimitOptions = ClientIpOptions & {
   /** A `@vicstack/redis` instance, e.g. `createRedis({ url: env.REDIS_URL })`. */
   redis: { client: { ttl(key: string): Promise<number> }; increment: Increment };
   /** Called whenever a Redis operation fails. Defaults to `console.error`. */
@@ -46,16 +46,60 @@ export type CreateRateLimitOptions = {
  * increment-with-TTL primitive. Fails open: a Redis outage reports the
  * error through `onError` and lets the request through rather than taking
  * the route down with it.
+ *
+ * Behind a reverse proxy, set `trustedProxies` (or `ipHeader`) so the default
+ * identity is the real client rather than the proxy. Without either, the
+ * socket address is used and forwarding headers are ignored, since a client
+ * can set them to anything.
+ *
+ * @throws if `trustedProxies` is not a non-negative integer, or if both
+ * `trustedProxies` and `ipHeader` are set.
  */
-export function createRateLimit({ redis, onError = defaultOnError }: CreateRateLimitOptions) {
+export function createRateLimit({
+  redis,
+  onError = defaultOnError,
+  trustedProxies,
+  ipHeader,
+}: CreateRateLimitOptions) {
+  assertClientIpOptions({ trustedProxies, ipHeader });
+
+  const ipOptions: ClientIpOptions = { trustedProxies, ipHeader };
+  const proxyUnconfigured = !ipHeader && !trustedProxies;
+  let warnedAboutForwardedHeader = false;
+
+  const defaultBy = (c: Context) => {
+    if (
+      proxyUnconfigured &&
+      !warnedAboutForwardedHeader &&
+      c.req.header("x-forwarded-for") !== undefined
+    ) {
+      warnedAboutForwardedHeader = true;
+      onError(
+        new Error(
+          "x-forwarded-for is present but trustedProxies is 0, so it is ignored and every client behind the proxy shares one address. Set trustedProxies (or ipHeader) to the number of proxies you control.",
+        ),
+        "ratelimit.config",
+      );
+    }
+    return getClientIp(c, ipOptions);
+  };
+
   return function rateLimit<E extends Env = Env>({
     keyPrefix,
     windowSec,
     max,
-    by = defaultBy as (c: Context<E>) => string | Promise<string>,
+    by = defaultBy as (c: Context<E>) => string | undefined | Promise<string | undefined>,
   }: RateLimitOptions<E>) {
     return createMiddleware<E>(async (c, next) => {
       const subject = await by(c);
+      if (subject === undefined) {
+        onError(
+          new Error("could not determine the client identity; request not rate limited"),
+          `ratelimit.${keyPrefix}.identity`,
+        );
+        return next();
+      }
+
       const key = `ratelimit:${keyPrefix}:${subject}`;
 
       const [count, error] = await tryCatch(redis.increment(key, windowSec));
