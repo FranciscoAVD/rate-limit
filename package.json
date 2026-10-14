@@ -1,6 +1,6 @@
 {
   "name": "@vicstack/rate-limit",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Hono rate-limit middleware backed by a Redis-like increment+TTL primitive.",
   "license": "MIT",
   "author": "Victoriano <fvictoriano.dev@gmail.com>",

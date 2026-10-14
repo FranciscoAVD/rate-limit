@@ -1,18 +1,29 @@
 import type { Context } from "hono";
+import { parseCidr, parseIp, matchesCidr, type ParsedCidr } from "./ip-match";
 
 export type ClientIpOptions = {
   /**
-   * How many reverse proxies you control sit between the internet and this
-   * app. `0` (the default) means none: the client address is the socket's
-   * and every forwarding header is ignored, because without a trusted proxy
-   * the client chose those headers itself.
+   * How to find the real client behind reverse proxies you control. Two shapes:
    *
-   * With `n > 0` the address is the `n`th entry from the right of
-   * `x-forwarded-for`. One proxy that appends to the header and one that
-   * overwrites it both put the real address last, so `1` is right for either.
-   * Add one per extra hop you control (a CDN in front of a proxy is `2`).
+   * - A number: how many proxy hops sit between the internet and this app. The address is the
+   *   `n`th entry from the right of `x-forwarded-for`. One proxy that appends to the header and
+   *   one that overwrites it both put the real address last, so `1` is right for either. Add one
+   *   per extra hop you control (a CDN in front of a proxy is `2`). This mode trusts every one of
+   *   those hops by position alone - it never looks at what address they actually are.
+   * - An array of IPs/CIDRs: the known addresses of your own reverse proxies (this is what
+   *   better-auth's own `advanced.ipAddress.trustedProxies` takes, so the same value can drive
+   *   both). `x-forwarded-for` is walked from the right, skipping any entry that matches one of
+   *   these ranges, until the first entry that doesn't - that's the client, however many trusted
+   *   hops away. Handles a variable or unknown number of hops (several edge load balancers, a
+   *   CDN that sometimes double-appends), which a hop count can't. A malformed entry reached
+   *   before an untrusted one breaks the chain (returns `undefined`): if a hop can't be read, the
+   *   hops before it can't be trusted to be honest either.
+   *
+   * `0` or `[]` (the default) means neither configured: the client address is the socket's and
+   * every forwarding header is ignored, because without a trusted proxy the client chose those
+   * headers itself.
    */
-  trustedProxies?: number;
+  trustedProxies?: number | readonly string[];
   /**
    * A single header your proxy sets to the client address, such as
    * `cf-connecting-ip`. Only safe if the proxy overwrites it on every request
@@ -56,6 +67,31 @@ function socketAddress(c: Context): string | undefined {
   return clean(env.incoming?.socket?.remoteAddress);
 }
 
+function forwardedHops(c: Context): string[] {
+  return (c.req.header("x-forwarded-for") ?? "")
+    .split(",")
+    .map((hop) => hop.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Walks `hops` from the right, skipping any entry that matches one of `trusted`'s ranges, and
+ * returns the first one that doesn't - the client, as seen by the first hop we don't control. A
+ * hop that fails to parse as an IP at all breaks the chain (`undefined`): an attacker who can make
+ * one entry unreadable could be hiding behind it, so nothing past it is trustworthy either.
+ * `undefined` also when `hops` is empty, or every hop was trusted (nothing left to report).
+ */
+function clientFromTrustedChain(hops: string[], trusted: readonly ParsedCidr[]): string | undefined {
+  for (let i = hops.length - 1; i >= 0; i--) {
+    const hop = hops[i]!;
+    const bytes = parseIp(hop);
+    if (!bytes) return undefined;
+    if (trusted.some((net) => matchesCidr(bytes, net))) continue;
+    return hop;
+  }
+  return undefined;
+}
+
 /**
  * Resolves the client address for `c`, or `undefined` when it cannot be
  * determined with the configured trust. Never falls back to a header the
@@ -71,25 +107,46 @@ export function getClientIp(
 ): string | undefined {
   if (ipHeader) return clean(c.req.header(ipHeader));
 
-  if (trustedProxies > 0) {
-    const hops = (c.req.header("x-forwarded-for") ?? "")
-      .split(",")
-      .map((hop) => hop.trim())
-      .filter(Boolean);
+  if (Array.isArray(trustedProxies)) {
+    if (trustedProxies.length === 0) return socketAddress(c);
+    // validated at createRateLimit time (assertClientIpOptions), so every entry parses here
+    const trusted = trustedProxies.map((entry) => parseCidr(entry)!);
+    return clientFromTrustedChain(forwardedHops(c), trusted);
+  }
+
+  if (typeof trustedProxies === "number" && trustedProxies > 0) {
+    const hops = forwardedHops(c);
     return hops.length >= trustedProxies ? hops.at(-trustedProxies) : undefined;
   }
 
   return socketAddress(c);
 }
 
+const trustedProxiesConfigured = (trustedProxies: number | readonly string[] | undefined) =>
+  typeof trustedProxies === "number" ? trustedProxies > 0 : (trustedProxies?.length ?? 0) > 0;
+
 /** Throws on a configuration that cannot be what the caller meant. */
 export function assertClientIpOptions({ trustedProxies, ipHeader }: ClientIpOptions): void {
-  if (trustedProxies !== undefined && (!Number.isInteger(trustedProxies) || trustedProxies < 0)) {
-    throw new RangeError(
-      `@vicstack/rate-limit: trustedProxies must be a non-negative integer, got ${trustedProxies}`,
+  if (typeof trustedProxies === "number") {
+    if (!Number.isInteger(trustedProxies) || trustedProxies < 0) {
+      throw new RangeError(
+        `@vicstack/rate-limit: trustedProxies must be a non-negative integer or an array of IPs/CIDRs, got ${trustedProxies}`,
+      );
+    }
+  } else if (Array.isArray(trustedProxies)) {
+    const invalid = trustedProxies.filter((entry) => parseCidr(entry) === null);
+    if (invalid.length > 0) {
+      throw new TypeError(
+        `@vicstack/rate-limit: trustedProxies contains entries that are not an IP address or CIDR range: ${invalid.join(", ")}`,
+      );
+    }
+  } else if (trustedProxies !== undefined) {
+    throw new TypeError(
+      "@vicstack/rate-limit: trustedProxies must be a non-negative integer or an array of IPs/CIDRs",
     );
   }
-  if (ipHeader && trustedProxies) {
+
+  if (ipHeader && trustedProxiesConfigured(trustedProxies)) {
     throw new TypeError(
       "@vicstack/rate-limit: set either ipHeader or trustedProxies, not both",
     );

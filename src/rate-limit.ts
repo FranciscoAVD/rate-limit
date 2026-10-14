@@ -64,12 +64,14 @@ export type CreateRateLimitOptions = ClientIpOptions & {
  * the route down with it.
  *
  * Behind a reverse proxy, set `trustedProxies` (or `ipHeader`) so the default
- * identity is the real client rather than the proxy. Without either, the
- * socket address is used and forwarding headers are ignored, since a client
- * can set them to anything.
+ * identity is the real client rather than the proxy. `trustedProxies` takes
+ * either a hop count or an array of your proxies' own IPs/CIDRs (the same
+ * shape better-auth's `advanced.ipAddress.trustedProxies` takes) — see
+ * `ClientIpOptions`. Without either, the socket address is used and
+ * forwarding headers are ignored, since a client can set them to anything.
  *
- * @throws if `trustedProxies` is not a non-negative integer, or if both
- * `trustedProxies` and `ipHeader` are set.
+ * @throws if `trustedProxies` is not a non-negative integer or an array of
+ * valid IPs/CIDRs, or if both `trustedProxies` and `ipHeader` are set.
  */
 export function createRateLimit({
   redis,

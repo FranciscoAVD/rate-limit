@@ -240,6 +240,96 @@ describe("client identity", () => {
     });
   });
 
+  describe("trustedProxies (allowlist)", () => {
+    test("a single trusted proxy IP: takes the entry before it", async () => {
+      const { app, keys } = track({ trustedProxies: ["10.0.0.9"] });
+      await app.request("/", { headers: { "x-forwarded-for": "6.6.6.6, 10.0.0.9" } });
+      expect(keys).toEqual(["ratelimit:x:6.6.6.6"]);
+    });
+
+    test("a CIDR range matches any proxy address inside it", async () => {
+      const { app, keys } = track({ trustedProxies: ["10.0.0.0/24"] });
+      await app.request("/", { headers: { "x-forwarded-for": "203.0.113.5, 10.0.0.42" } });
+      expect(keys).toEqual(["ratelimit:x:203.0.113.5"]);
+    });
+
+    test("walks past several trusted hops to find the real client", async () => {
+      const { app, keys } = track({ trustedProxies: ["10.0.0.0/24", "10.1.0.0/24"] });
+      await app.request("/", {
+        headers: { "x-forwarded-for": "203.0.113.5, 10.1.0.1, 10.0.0.9" },
+      });
+      expect(keys).toEqual(["ratelimit:x:203.0.113.5"]);
+    });
+
+    test("a spoofed leading entry cannot change the bucket", async () => {
+      const { app, keys } = track({ trustedProxies: ["10.0.0.9"] });
+      for (const spoof of ["1.1.1.1", "2.2.2.2", "3.3.3.3"]) {
+        await app.request("/", { headers: { "x-forwarded-for": `${spoof}, 10.0.0.9` } });
+      }
+      expect(new Set(keys)).toEqual(new Set(["ratelimit:x:1.1.1.1", "ratelimit:x:2.2.2.2", "ratelimit:x:3.3.3.3"]));
+    });
+
+    test("a malformed hop before reaching an untrusted one fails closed: no identity", async () => {
+      const { app, keys, errors } = track({ trustedProxies: ["10.0.0.9"] });
+      const res = await app.request("/", {
+        headers: { "x-forwarded-for": "not-an-ip, 10.0.0.9" },
+      });
+      expect(res.status).toBe(200);
+      expect(keys).toEqual([]);
+      expect(errors.map((e) => e.context)).toEqual(["ratelimit.x.identity"]);
+    });
+
+    test("every hop trusted means no identity: passes through and reports", async () => {
+      const { app, keys, errors } = track({ trustedProxies: ["10.0.0.0/24"] });
+      const res = await app.request("/", {
+        headers: { "x-forwarded-for": "10.0.0.1, 10.0.0.9" },
+      });
+      expect(res.status).toBe(200);
+      expect(keys).toEqual([]);
+      expect(errors.map((e) => e.context)).toEqual(["ratelimit.x.identity"]);
+    });
+
+    test("a missing header means no identity", async () => {
+      const { app, keys, errors } = track({ trustedProxies: ["10.0.0.9"] });
+      const res = await app.request("/");
+      expect(res.status).toBe(200);
+      expect(keys).toEqual([]);
+      expect(errors.map((e) => e.context)).toEqual(["ratelimit.x.identity"]);
+    });
+
+    test("an empty array falls back to the socket address, same as unset", async () => {
+      const { app, keys } = track({ trustedProxies: [] });
+      await app.request("/", {}, bunSocket("10.0.0.9"));
+      expect(keys).toEqual(["ratelimit:x:10.0.0.9"]);
+    });
+
+    test("does not read the socket address once configured", async () => {
+      const { app, keys } = track({ trustedProxies: ["10.0.0.9"] });
+      await app.request(
+        "/",
+        { headers: { "x-forwarded-for": "203.0.113.5, 10.0.0.9" } },
+        bunSocket("10.1.1.1"),
+      );
+      expect(keys).toEqual(["ratelimit:x:203.0.113.5"]);
+    });
+
+    test("matches an IPv4-mapped IPv6 proxy address against an IPv4 CIDR entry", async () => {
+      const { app, keys } = track({ trustedProxies: ["10.0.0.0/24"] });
+      await app.request("/", {
+        headers: { "x-forwarded-for": "203.0.113.5, ::ffff:10.0.0.9" },
+      });
+      expect(keys).toEqual(["ratelimit:x:203.0.113.5"]);
+    });
+
+    test("matches an IPv6 proxy address by exact IP", async () => {
+      const { app, keys } = track({ trustedProxies: ["2001:db8::1"] });
+      await app.request("/", {
+        headers: { "x-forwarded-for": "203.0.113.5, 2001:db8::1" },
+      });
+      expect(keys).toEqual(["ratelimit:x:203.0.113.5"]);
+    });
+  });
+
   describe("ipHeader", () => {
     test("reads the named header", async () => {
       const { app, keys } = track({ ipHeader: "cf-connecting-ip" });
@@ -325,6 +415,38 @@ describe("client identity", () => {
 
     test("accepts trustedProxies of 0", () => {
       expect(() => createRateLimit({ redis, trustedProxies: 0 })).not.toThrow();
+    });
+
+    test("accepts an array of valid IPs and CIDRs", () => {
+      expect(() =>
+        createRateLimit({ redis, trustedProxies: ["10.0.0.9", "10.1.0.0/24", "2001:db8::1"] }),
+      ).not.toThrow();
+    });
+
+    test("accepts an empty array", () => {
+      expect(() => createRateLimit({ redis, trustedProxies: [] })).not.toThrow();
+    });
+
+    test("rejects an array containing an entry that isn't an IP or CIDR", () => {
+      expect(() =>
+        createRateLimit({ redis, trustedProxies: ["10.0.0.9", "not-an-ip"] }),
+      ).toThrow(TypeError);
+    });
+
+    test("rejects an array with a CIDR prefix wider than the address family allows", () => {
+      expect(() => createRateLimit({ redis, trustedProxies: ["10.0.0.0/33"] })).toThrow(TypeError);
+    });
+
+    test("rejects an array together with ipHeader", () => {
+      expect(() =>
+        createRateLimit({ redis, trustedProxies: ["10.0.0.9"], ipHeader: "cf-connecting-ip" }),
+      ).toThrow(TypeError);
+    });
+
+    test("does not reject an empty array together with ipHeader", () => {
+      expect(() =>
+        createRateLimit({ redis, trustedProxies: [], ipHeader: "cf-connecting-ip" }),
+      ).not.toThrow();
     });
   });
 });

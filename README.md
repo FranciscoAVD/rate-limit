@@ -46,6 +46,7 @@ a trust decision, so you state it when you create the limiter:
 | The app exposed directly | nothing | The socket address. Forwarding headers are ignored. |
 | One reverse proxy you control | `trustedProxies: 1` | The last entry of `x-forwarded-for` |
 | A CDN in front of a proxy, both yours | `trustedProxies: 2` | The second entry from the right |
+| A known, fixed set of proxies (any count, including a varying number of hops) | `trustedProxies: ["10.0.0.0/24", "2001:db8::1"]` | The first entry from the right that isn't inside one of these ranges |
 | A proxy that sets one header, such as Cloudflare | `ipHeader: "cf-connecting-ip"` | That header |
 
 **Why not just read `x-forwarded-for`.** Many proxies *append* to a header the
@@ -55,6 +56,22 @@ entry (with one proxy) is the address your proxy saw, whether it appends or
 overwrites, so that is what `trustedProxies` reads. Count only proxies you
 control.
 
+**The array form.** Instead of a hop count, `trustedProxies` also takes an
+array of your own reverse proxies' IPs/CIDRs — the same shape
+[better-auth's `advanced.ipAddress.trustedProxies`](https://www.better-auth.com)
+takes, so one list of addresses can configure both. `x-forwarded-for` is
+walked from the right, skipping any entry that matches one of these ranges,
+until the first one that doesn't — that's the client, however many trusted
+hops away. Use this when the number of hops varies (several edge load
+balancers, a CDN that sometimes double-appends) rather than counting them. A
+malformed entry reached before an untrusted one fails closed (no identity):
+if a hop can't be read, the hops before it can't be trusted to be honest
+either.
+
+```ts
+const rateLimit = createRateLimit({ redis, trustedProxies: ["10.0.0.0/24"] });
+```
+
 **Things to get right**
 
 - Make the app reachable only through the proxy (bind to a private interface
@@ -62,16 +79,18 @@ control.
   any header they like and the settings above stop meaning anything.
 - With `ipHeader`, the proxy must overwrite that header on every request,
   never pass the client's value through.
-- `trustedProxies` and `ipHeader` are mutually exclusive; setting both, or a
-  `trustedProxies` that is not a non-negative integer, throws when you call
-  `createRateLimit`.
+- `trustedProxies` and `ipHeader` are mutually exclusive (an empty array
+  counts as unset); setting both non-empty, or a `trustedProxies` that is
+  neither a non-negative integer nor an array of valid IPs/CIDRs, throws
+  when you call `createRateLimit`.
 - If the address cannot be determined (header missing, fewer entries than
-  `trustedProxies`, no socket bindings), the request is let through and
-  `onError` is called. There is no shared fallback bucket.
+  `trustedProxies`, every entry trusted, a malformed entry, no socket
+  bindings), the request is let through and `onError` is called. There is no
+  shared fallback bucket.
 - With nothing set behind a proxy, every client appears to come from the
   proxy's address and shares one bucket. If it sees `x-forwarded-for` while
-  `trustedProxies` is `0`, the limiter calls `onError` once with the context
-  `ratelimit.config` to say so.
+  `trustedProxies` is `0` or `[]`, the limiter calls `onError` once with the
+  context `ratelimit.config` to say so.
 - The socket address is read from the runtime bindings Hono exposes as
   `c.env`: Bun (`export default { fetch: app.fetch }`, which passes the
   server) and `@hono/node-server`. Other runtimes have no socket address;
